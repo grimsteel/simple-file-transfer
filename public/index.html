@@ -1,0 +1,439 @@
+<!DOCTYPE html>
+<html lang="en" style="--primary-h: 38deg;--primary-s:98%;--primary-l:46%">
+  <head>
+    <meta charset="utf-8" />
+    <title>Simple P2P File Transfer</title>
+    <script src="https://cdn.jsdelivr.net/npm/peerjs@1.4.7/dist/peerjs.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/idb@7/build/umd.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bulma-toast@2.4.2/dist/bulma-toast.min.js"></script>
+    <script src="qrcode.min.js"></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@bulvar/bulma@0.11.13/css/bulma.min.css" />
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.3/font/bootstrap-icons.css" />
+    <meta name="robots" content="noindex" />
+    <style>
+      .message.is-danger:not([hidden]) ~ div {
+        display: none;
+      }
+      html, body {
+        height: 100%;
+      }
+      .panel {
+        height: 100%;
+      }
+      .columns {
+        min-height: 0;
+      }
+      #connections-container {
+        overflow-y: auto;
+      }
+      #input-upload-file[disabled] + .file-cta {
+        opacity: 0.7;
+        cursor: not-allowed;
+        pointer-events: none;
+      }
+      #input-upload-file[disabled] {
+        cursor: not-allowed;
+      }
+    </style>
+  </head>
+  <body class="is-flex is-flex-direction-column">
+    <section class="hero is-primary">
+      <div class="hero-body">
+        <p class="title">Simple P2P Transfer</p>
+        <p class="subtitle">Quickly transfer files directly between two computers. Your data does not go to any external servers including our own.
+      </div>
+    </section>
+    <div class="message is-danger m-3" hidden>
+      <div class="message-body">Disconnected from server. Please reload</div>
+    </div>
+    <div class="box m-3">
+       <div class="field has-addons">
+        <p class="control">
+          <a class="button is-static">Client ID:</a>
+        </p>
+        <p class="control is-expanded">
+          <input class="input" type="text" id="field-client-id" readonly />
+        </p>
+        <p class="control">
+          <button class="button is-primary" type="button" id="btn-copy-client-id">
+            <span class="icon">
+              <i class="bi bi-clipboard"></i>
+            </span>
+          </button>
+        </p>
+       <p class="control">
+          <button class="button is-warning" type="button" id="btn-generate-qrcode">
+            <span class="icon">
+              <i class="bi bi-qr-code"></i>
+            </span>
+          </button>
+        </p>
+      </div>
+      <p class="help">Your Client ID is what other users use to send stuff to you. Only share it with people you trust</p>
+      <div class="field has-addons mt-3">
+        <p class="control">
+          <a class="button is-static">Username:</a>
+        </p>
+        <p class="control is-expanded">
+          <input class="input" type="text" id="field-username" placeholder="Defaults to your Client ID" />
+        </p>
+      </div>
+      <p class="help">Your username is only seen by people you connect to and people who connect to you</p>
+    </div>
+    <div class="columns mx-3 is-flex-grow-1">
+      <div class="column is-one-fifth">
+        <nav class="panel is-success is-flex is-flex-direction-column">
+          <p class="panel-heading">Connections</p>
+          <div id="connections-container"></div>
+          <div class="panel-block mt-auto">
+            <button class="button is-success is-outlined is-fullwidth" id="btn-add-connection">
+              <span class="icon">
+                <i class="bi bi-person-add"></i>
+              </span>
+              <span>Add Connection</span>
+            </button>
+          </div>
+        </nav>
+      </div>
+      <div class="column is-two-fifths">
+        <h2 class="title is-5">Inbox</h2>
+        <div id="inbox"></div>
+      </div>
+      <div class="column is-two-fifths">
+        <h2 class="title is-5">Send</h2>
+        <div class="control">
+          <div class="tags has-addons">
+            <span class="tag is-primary">Sending To</span>
+            <span class="tag is-primary is-light" id="field-tag-sender">Nobody</span>
+          </div>
+        </div>
+        <div class="file is-large is-boxed mt-3">
+          <label class="file-label">
+            <input class="file-input" type="file" id="input-upload-file" disabled />
+            <span class="file-cta">
+              <span class="file-icon">
+                <i class="bi bi-cloud-arrow-up-fill"></i>
+              </span>
+              <span class="file-label">Send a file</span>
+            </span>
+          </label>
+        </div>
+      </div>
+    </div>
+    <div class="modal" id="modal-add">
+      <div class="modal-background"></div>
+      <div class="modal-card">
+        <header class="modal-card-head">
+          <p class="modal-card-title">Add Connection</p>
+          <button class="delete close" aria-label="close"></button>
+        </header>
+        <section class="modal-card-body">
+          <h3 class="title is-5">Connect to a New User</h3>
+          <div class="field">
+            <label class="label">Connect with a Client ID</label>
+            <div class="control">
+              <input class="input" type="text" placeholder="Client ID" id="field-input-client-id" />
+            </div>
+          </div>
+          <div class="field" id="container-qrcode" hidden>
+            <label class="label">Connect with a QR Code</label>
+            <video id="qr-reader" style="width: 100%;"></video>
+            <p class="control">
+              <button type="button" class="button is-info" id="btn-start-scanning">Start Scanning</button>
+              <button type="button" class="button is-danger" id="btn-stop-scanning">Stop Scanning</button>
+            </p>
+          </div>
+        </section>
+        <footer class="modal-card-foot">
+          <button class="button is-success">Add</button>
+          <button class="button close">Cancel</button>
+        </footer>
+      </div>
+    </div>
+    <div class="modal" id="modal-qrcode">
+      <div class="modal-background"></div>
+      <div class="modal-content box">
+        <p class="image" id="qrcode-container"></p>
+      </div>
+      <button class="modal-close is-large" aria-label="close"></button>
+    </div>
+    <script>
+      const btnCopy = document.getElementById("btn-copy-client-id");
+      const fieldClientId = document.getElementById("field-client-id");
+      const fieldInputClientId = document.getElementById("field-input-client-id");
+      const fieldUsername = document.getElementById("field-username");
+      const connectionsPanel = document.getElementById("connections-container");
+      const qrContainer = document.getElementById('qr-reader');
+      const addConnectionModal = document.getElementById("modal-add");
+      const qrcodeModal = document.getElementById("modal-qrcode");
+      const inputUpload = document.getElementById("input-upload-file");
+      const fieldTagSender = document.getElementById("field-tag-sender");
+      const inbox = document.getElementById("inbox");
+      let lastResult = null;
+      const peerJSOptions = {
+        host: "/",
+        port: 443,
+        path: "/broker",
+        secure: true
+      };
+      let mimeTypes = {};
+      let existingClientId = localStorage.getItem("client-id");
+      const peer = existingClientId ? new Peer(existingClientId, peerJSOptions) : new Peer(peerJSOptions);
+      btnCopy.addEventListener("click", () => navigator.clipboard.writeText(fieldClientId.value));
+      fieldUsername.value = localStorage.getItem("username");
+      
+      async function getDb() {
+        return await idb.openDB("simple-file-transfer-db", 1, {
+          upgrade(db) {
+            db.createObjectStore("connected-users", {keyPath: "clientId"});
+          }
+        });
+      }
+
+      function closeModal() {
+        addConnectionModal.classList.remove("is-active");
+        qrScanner.stop();
+        lastResult = null;
+      }
+
+      const sender = {
+        currentId: null,
+        clear() {
+          inputUpload.disabled = true;
+          fieldTagSender.innerText = "Nobody";
+          this.currentId = null;
+        },
+        set(username, clientId) {
+          inputUpload.disabled = false;
+          fieldTagSender.innerText = username;
+          this.currentId = clientId;
+        },
+        send(blob) {
+          if (blob instanceof Blob && this.currentId && connections.clients[this.currentId]) {
+            connections.clients[this.currentId].send({blob, name: blob.name, type: blob.type});
+            bulmaToast.toast({message: "Sent!", type: "is-success"});
+          }
+        },
+        async receive(data, clientId) {
+          if ("name" in data && "blob" in data && "type" in data) {
+            let { username } = await getDb().then(db => db.get("connected-users", clientId));
+            let blob = new Blob([data.blob]);
+            blob.type = data.type;
+            let messageMediaObject = document.createElement("article");
+            messageMediaObject.classList.add("media", "block");
+            let mediaContent = messageMediaObject.appendChild(document.createElement("div"));
+            mediaContent.classList.add("media-content");
+            let contentBlock = mediaContent.appendChild(document.createElement("div"));
+            contentBlock.classList.add("content");
+            let fileType = mimeTypes[data.type]?.extensions[0].toUpperCase() || "Unknown";
+            let p = contentBlock.appendChild(document.createElement("p"));
+            p.appendChild(document.createElement("strong")).innerText = data.name;
+            p.appendChild(document.createElement("small")).innerText = ` ${new Date().toLocaleTimeString()}`;
+            p.appendChild(document.createElement("br"));
+            p.appendChild(document.createTextNode(`Sent by ${username} • ${Math.round(blob.size / 1000)} KB • ${fileType} file`));
+            let btnDownload = mediaContent.appendChild(document.createElement("div")).appendChild(document.createElement("button"));
+            btnDownload.classList.add("button");
+            btnDownload.type = "button";
+            btnDownload.innerHTML = `<span class="icon"><i class="bi-cloud-arrow-down-fill bi"></i></span><span>Download</span>`;
+            btnDownload.addEventListener("click", async () => {
+              let handle = await showSaveFilePicker({suggestedName: data.name, types: [{
+                description: `${fileType} files`,
+                accept: { [data.type]: `.${mimeTypes[data.type]?.extensions[0] || "txt"}` }
+              }]});
+              let writable = await handle.createWritable();
+              await writable.write(blob);
+              await writable.close();
+            });
+            inbox.appendChild(messageMediaObject);
+          } else return false;
+        }
+      };
+      
+      const connections = {
+        panelItems: {},
+        clients: {},
+        createPanelRow(username, isConnected, peerId) {
+          let panelBlock = document.createElement("a");
+          panelBlock.classList.add("panel-block");
+          let panelIcon = panelBlock.appendChild(document.createElement("span"));
+          panelIcon.classList.add("panel-icon");
+          panelIcon.innerHTML = `<i class="bi"></i>`;
+          let itemsLevel = panelBlock.appendChild(document.createElement("div"));
+          itemsLevel.classList.add("level", "is-flex-grow-1");
+          let levelLeft = itemsLevel.appendChild(document.createElement("div"));
+          levelLeft.classList.add("level-left", "is-flex-shrink-1");
+          let usernameText = levelLeft.appendChild(document.createElement("p"));
+          usernameText.classList.add("level-item");
+          usernameText.innerText = username;
+          usernameText.style.maxWidth = "100%";
+          let levelRight = itemsLevel.appendChild(document.createElement("div"));
+          levelRight.classList.add("level-right");
+          let btnDisconnect = levelRight.appendChild(document.createElement("a"));
+          btnDisconnect.classList.add("has-text-warning", "mr-3");
+          btnDisconnect.innerHTML = `<i class="bi bi-person-fill-slash"></i>`;
+          btnDisconnect.title = "Disconnect";
+          let btnForget = levelRight.appendChild(document.createElement("a"));
+          btnForget.classList.add("has-text-danger");
+          btnForget.innerHTML = `<i class="bi bi-person-fill-x"></i>`;
+          btnForget.title = "Forget";
+          btnDisconnect.addEventListener("click", e => {
+            e.stopPropagation();
+            this.clients[peerId]?.close();
+          });
+          btnForget.addEventListener("click", async e => {
+            e.stopPropagation();
+            let db = await getDb()
+            await db.delete("connected-users", peerId);
+            this.clients[peerId]?.close();
+            panelBlock.remove();
+            delete this.panelItems[peerId];
+          });
+          panelBlock.addEventListener("click", () => {
+            if (panelBlock.classList.contains("is-active")) sender.set(usernameText.innerText, peerId);
+            else this.initiateConnection(peerId);
+          });
+          Object.defineProperty(panelBlock, "connected", {
+            set(newValue) {
+              panelBlock.classList.toggle("is-active", newValue);
+              panelIcon.firstElementChild.classList.toggle("bi-wifi-off", !newValue);
+              panelIcon.firstElementChild.classList.toggle("bi-wifi", newValue);
+              panelBlock.querySelector("a.has-text-warning").hidden = !newValue;
+              panelBlock.title = newValue ? "Send Message" : "Connect";
+            }
+          });
+          this.panelItems[peerId] = panelBlock;
+          panelBlock.connected = isConnected;
+          return panelBlock;
+        },
+        createOrUpdatePanelRow(username, isConnected, peerId) {
+          if (this.panelItems[peerId]) {
+            this.panelItems[peerId].connected = isConnected;
+            this.panelItems[peerId].querySelector(".level-left .level-item").innerText = username;
+          } else connectionsPanel.appendChild(this.createPanelRow(username, isConnected, peerId));
+        },
+        acceptConnection(connection) {
+          connection.on("open", () => {
+            connection.send(`$USERNAME$${fieldUsername.value || peer.id}`);
+            this.createOrUpdatePanelRow(connection.metadata.initiatorUsername, true, connection.peer);
+            this.clients[connection.peer] = connection;
+            getDb().then(db => db.put("connected-users", {
+              clientId: connection.peer,
+              username: connection.metadata.initiatorUsername
+            }));
+          });
+          connection.on("data", data => {
+            sender.receive(data, connection.peer);
+          });
+          connection.on("close", () => {
+            this.panelItems[connection.peer].connected = false;
+            delete this.clients[connection.peer];
+            sender.clear();
+          });
+        },
+        initiateConnection(clientId) {
+          if (this.clients[clientId]) return bulmaToast.toast({message: "You are already connected to that user", type: "is-warning"});
+          const connection = peer.connect(clientId, {metadata: {initiator: peer.id, initiatorUsername: fieldUsername.value || peer.id}});
+          if (!connection) return;
+          this.clients[connection.peer] = connection;
+          connection.on("data", data => {
+            if (typeof data === "string" && data.startsWith("$USERNAME$")) {
+              this.createOrUpdatePanelRow(data.replace("$USERNAME$", ""), true, connection.peer);
+              getDb().then(db => db.put("connected-users", {
+                clientId: connection.peer,
+                username: data.replace("$USERNAME$", "")
+              }));
+            } else sender.receive(data, clientId);
+          });
+          connection.on("close", () => {
+            this.panelItems[clientId].connected = false;
+            delete this.clients[connection.peer];
+            sender.clear();
+          });
+        }
+      };
+
+      const qrScanner = {
+        stream: null,
+        interval: 0,
+        barcodeDetector: null,
+        async start() {
+          if (this.barcodeDetector) {
+            this.stream = await navigator.mediaDevices.getUserMedia({
+              video: { facingMode: { ideal: "environment" } },
+              audio: false
+            });
+            qrContainer.srcObject = this.stream;
+            qrContainer.play();
+            this.interval = window.setInterval(async () => {
+              const barcodes = await this.barcodeDetector.detect(qrContainer);
+              console.log(barcodes);
+              if (barcodes.length <= 0) return;
+              if (barcodes[0].rawValue !== lastResult) {
+                lastResult = barcodes[0].rawValue
+                fieldInputClientId.value = lastResult;
+              }
+            }, 1000);
+          }
+        },
+        stop() {
+          if (this.stream) {
+            for (let track of this.stream.getTracks()) track.stop();
+            qrContainer.srcObject = null;
+            this.stream = null;
+            window.clearInterval(this.interval);
+            this.interval = 0;
+          }
+        }
+      };
+
+      if ("BarcodeDetector" in window) {
+        document.getElementById("container-qrcode").hidden = false;
+        qrScanner.barcodeDetector = new BarcodeDetector({formats: ['qr_code']});
+      }
+      
+      peer.on("open", () => {
+        fieldClientId.value = peer.id;
+        localStorage.setItem("client-id", peer.id);
+        new QRCode(document.getElementById("qrcode-container"), {
+          text: peer.id,
+          width: 640,
+          height: 640,
+        });
+      });
+      peer.on("connection", conn => {
+        connections.acceptConnection(conn);
+      });
+      peer.on("error", err => {
+        switch(err.type) {
+          case "peer-unavailable":
+            bulmaToast.toast({message: "Client not found", type: "is-danger is-light", dismissable: true});
+            break;
+          case "network":
+          case "server-error":
+            bulmaToast.toast({message: "The connection to the remote server was lost or couldn't be established", type: "is-danger is-light", dismissable: true, duration: 5000});
+            peer.destroy();
+            document.querySelector(".message.is-danger").hidden = false;
+            break;
+          default:
+            bulmaToast.toast({message: err.toString(), type: "is-danger is-light", dismissable: true});
+        }
+      });
+      document.getElementById("btn-add-connection").addEventListener("click", () => addConnectionModal.classList.add("is-active"));
+      addConnectionModal.querySelectorAll(".close").forEach(el => el.addEventListener("click", closeModal));
+      document.getElementById("btn-start-scanning").addEventListener("click", () => qrScanner.start());
+      document.getElementById("btn-stop-scanning").addEventListener("click", () => qrScanner.stop());
+      addConnectionModal.querySelector(".modal-card-foot .button.is-success").addEventListener("click", () => {
+        if (fieldInputClientId.value) {
+          connections.initiateConnection(fieldInputClientId.value);
+          closeModal();
+        }
+      });
+      inputUpload.addEventListener("change", () => sender.send(inputUpload.files[0]));
+      fieldUsername.addEventListener("change", () => localStorage.setItem("username", fieldUsername.value));
+      qrcodeModal.querySelector(".modal-close").addEventListener("click", () => qrcodeModal.classList.remove("is-active"));
+      document.getElementById("btn-generate-qrcode").addEventListener("click", () => qrcodeModal.classList.add("is-active"));
+      getDb().then(db => db.getAll("connected-users")).then(users => users.forEach(user => connectionsPanel.appendChild(connections.createPanelRow(user.username, false, user.clientId))));
+      fetch("./mime-types.json").then(res => res.json()).then(json => mimeTypes = json);
+    </script>
+   </body>
+</html>
